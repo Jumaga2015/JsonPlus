@@ -258,9 +258,26 @@ public class JsonArray : JsonValue, IList<JsonValue>, IEquatable<JsonArray>
 
     public int IndexOf(JsonValue item) => Items.IndexOf(item);
 
-    public void Insert(int index, JsonValue item) => Items.Insert(index, item);
+    public void Insert(int index, JsonValue item)
+    {
+        if (index == Items.Count)
+        {
+            Add(item);
+            return;
+        }
+        var separatorSource = index > 0 ? Items[index - 1].TrailingTrivia : LeadingTrivia;
+        JsonTriviaEditing.PrepareInsert(separatorSource, Items[index].LeadingTrivia, item.LeadingTrivia, item.TrailingTrivia);
+        Items.Insert(index, item);
+    }
 
-    public void RemoveAt(int index) => Items.RemoveAt(index);
+    public void RemoveAt(int index)
+    {
+        if (index > 0 && index == Items.Count - 1)
+        {
+            JsonTriviaEditing.PrepareRemoveLast(Items[index - 1].TrailingTrivia, Items[index].TrailingTrivia);
+        }
+        Items.RemoveAt(index);
+    }
 
     public void Clear() => Items.Clear();
 
@@ -268,7 +285,16 @@ public class JsonArray : JsonValue, IList<JsonValue>, IEquatable<JsonArray>
 
     public void CopyTo(JsonValue[] array, int arrayIndex) => Items.CopyTo(array, arrayIndex);
 
-    public bool Remove(JsonValue item) => Items.Remove(item);
+    public bool Remove(JsonValue item)
+    {
+        var index = Items.IndexOf(item);
+        if (index < 0)
+        {
+            return false;
+        }
+        RemoveAt(index);
+        return true;
+    }
 
     public IEnumerator<JsonValue> GetEnumerator() => Items.GetEnumerator();
 
@@ -311,20 +337,8 @@ public class JsonArray : JsonValue, IList<JsonValue>, IEquatable<JsonArray>
         if (Items.Count > 0)
         {
             var lastItem = Items[Items.Count - 1];
-            if (item.LeadingTrivia.Count == 0)
-            {
-                item.LeadingTrivia.AddRange(lastItem.LeadingTrivia);
-            }
-            var commaIndex = lastItem.TrailingTrivia.FindIndex(t => t.Kind == JsonTriviaKind.Comma);
-            if (commaIndex == -1)
-            {
-                lastItem.TrailingTrivia.Insert(0, new JsonTrivia(JsonTriviaKind.Comma, ","));
-            }
-            var newLineIndex = lastItem.TrailingTrivia.FindIndex(t => t.Kind == JsonTriviaKind.NewLine);
-            if (newLineIndex != -1 && item.TrailingTrivia.Count == 0)
-            {
-                item.TrailingTrivia.Add(lastItem.TrailingTrivia[newLineIndex]);
-            }
+            var separatorSource = Items.Count > 1 ? Items[Items.Count - 2].TrailingTrivia : LeadingTrivia;
+            JsonTriviaEditing.PrepareAppend(separatorSource, lastItem.LeadingTrivia, lastItem.TrailingTrivia, item.LeadingTrivia, item.TrailingTrivia);
         }
         Items.Add(item);
     }
@@ -487,7 +501,10 @@ public class JsonObject : JsonValue, IDictionary<string, JsonValue>, IList<JsonP
     {
         if (sequence.Count > 0)
         {
-            CopyTrivia(sequence[sequence.Count - 1], prop, true);
+            var last = sequence[sequence.Count - 1];
+            var separatorSource = sequence.Count > 1 ? sequence[sequence.Count - 2].Value.TrailingTrivia : LeadingTrivia;
+            CopyKeyValueSeparator(last, prop);
+            JsonTriviaEditing.PrepareAppend(separatorSource, last.Key.LeadingTrivia, last.Value.TrailingTrivia, prop.Key.LeadingTrivia, prop.Value.TrailingTrivia);
         }
         items[prop.Key.Value] = prop;
         sequence.Add(prop);
@@ -495,10 +512,15 @@ public class JsonObject : JsonValue, IDictionary<string, JsonValue>, IList<JsonP
 
     public void Insert(int index, JsonProperty prop)
     {
-        if (index >= 0 && index <= sequence.Count)
+        if (index == sequence.Count)
         {
-            CopyTrivia(sequence[index == 0 ? index : index - 1], prop, isLast: index == sequence.Count);
+            Add(prop);
+            return;
         }
+        var next = sequence[index];
+        var separatorSource = index > 0 ? sequence[index - 1].Value.TrailingTrivia : LeadingTrivia;
+        CopyKeyValueSeparator(next, prop);
+        JsonTriviaEditing.PrepareInsert(separatorSource, next.Key.LeadingTrivia, prop.Key.LeadingTrivia, prop.Value.TrailingTrivia);
         sequence.Insert(index, prop);
         items[prop.Key.Value] = prop;
     }
@@ -510,14 +532,14 @@ public class JsonObject : JsonValue, IDictionary<string, JsonValue>, IList<JsonP
 
     public bool Remove(string key)
     {
-        if (items.Remove(key))
+        if (items.ContainsKey(key))
         {
             var index = sequence.FindIndex(p => p.Key.Value == key);
             if (index < 0)
             {
                 throw new InvalidOperationException("Inconsistent state: key exists in dictionary but not in sequence");
             }
-            sequence.RemoveAt(index);
+            RemoveAt(index);
             return true;
         }
         return false;
@@ -580,7 +602,12 @@ public class JsonObject : JsonValue, IDictionary<string, JsonValue>, IList<JsonP
 
     public void RemoveAt(int index)
     {
-        items.Remove(sequence[index].Key.Value);
+        var removed = sequence[index];
+        if (index > 0 && index == sequence.Count - 1)
+        {
+            JsonTriviaEditing.PrepareRemoveLast(sequence[index - 1].Value.TrailingTrivia, removed.Value.TrailingTrivia);
+        }
+        items.Remove(removed.Key.Value);
         sequence.RemoveAt(index);
     }
 
@@ -604,8 +631,13 @@ public class JsonObject : JsonValue, IDictionary<string, JsonValue>, IList<JsonP
 
     public bool Remove(JsonProperty item)
     {
-        items.Remove(item.Key.Value);
-        return sequence.Remove(item);
+        var index = sequence.IndexOf(item);
+        if (index < 0)
+        {
+            return false;
+        }
+        RemoveAt(index);
+        return true;
     }
 
     IEnumerator<JsonProperty> IEnumerable<JsonProperty>.GetEnumerator()
@@ -639,44 +671,12 @@ public class JsonObject : JsonValue, IDictionary<string, JsonValue>, IList<JsonP
         return true;
     }
 
-    private static void CopyTrivia(JsonProperty src, JsonProperty dst, bool isLast)
+    /// <summary>
+    /// Copies the colon and the whitespace around it from <paramref name="src"/> to <paramref name="dst"/>.
+    /// </summary>
+    private static void CopyKeyValueSeparator(JsonProperty src, JsonProperty dst)
     {
-        if (dst.Key.LeadingTrivia.Count == 0)
-        {
-            dst.Key.LeadingTrivia.AddRange(src.Key.LeadingTrivia);
-        }
-        if (dst.Key.TrailingTrivia.Count == 0)
-        {
-            dst.Key.TrailingTrivia.AddRange(src.Key.TrailingTrivia);
-        }
-        var srcCommaIndex = src.Value.TrailingTrivia.FindIndex(t => t.Kind == JsonTriviaKind.Comma);
-        if (srcCommaIndex == -1)
-        {
-            // add comma to src, assuming that src is the element before dst which is being inserted
-            src.Value.TrailingTrivia.Insert(0, new JsonTrivia(JsonTriviaKind.Comma, ","));
-        }
-        if (dst.Value.LeadingTrivia.Count == 0)
-        {
-            // copy leading value trivia from src to dst
-            dst.Value.LeadingTrivia.AddRange(src.Value.LeadingTrivia);
-        }
-        if (dst.Value.TrailingTrivia.Count == 0)
-        {
-            // add newline to dst trivia if src has it
-            var newLineIndex = src.Value.TrailingTrivia.FindIndex(t => t.Kind == JsonTriviaKind.NewLine);
-            if (newLineIndex != -1)
-            {
-                dst.Value.TrailingTrivia.Add(src.Value.TrailingTrivia[newLineIndex]);
-            }
-        }
-        if (!isLast)
-        {
-            // add comma to dst if it is not the last element
-            var dstCommaIndex = dst.Value.TrailingTrivia.FindIndex(t => t.Kind == JsonTriviaKind.Comma);
-            if (dstCommaIndex == -1)
-            {
-                dst.Value.TrailingTrivia.Insert(0, new JsonTrivia(JsonTriviaKind.Comma, ","));
-            }
-        }
+        JsonTriviaEditing.CopyKeySeparator(src.Key.TrailingTrivia, dst.Key.TrailingTrivia);
+        JsonTriviaEditing.CopyIndentation(src.Value.LeadingTrivia, dst.Value.LeadingTrivia);
     }
 }
