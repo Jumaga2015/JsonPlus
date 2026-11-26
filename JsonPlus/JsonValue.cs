@@ -265,7 +265,9 @@ public class JsonArray : JsonValue, IList<JsonValue>, IEquatable<JsonArray>
             Add(item);
             return;
         }
-        var separatorSource = index > 0 ? Items[index - 1].TrailingTrivia : LeadingTrivia;
+        var separatorSource = index > 0 ? Items[index - 1].TrailingTrivia
+            : Items.Count > 1 ? Items[0].TrailingTrivia
+            : LeadingTrivia;
         JsonTriviaEditing.PrepareInsert(separatorSource, Items[index].LeadingTrivia, item.LeadingTrivia, item.TrailingTrivia);
         Items.Insert(index, item);
     }
@@ -518,7 +520,9 @@ public class JsonObject : JsonValue, IDictionary<string, JsonValue>, IList<JsonP
             return;
         }
         var next = sequence[index];
-        var separatorSource = index > 0 ? sequence[index - 1].Value.TrailingTrivia : LeadingTrivia;
+        var separatorSource = index > 0 ? sequence[index - 1].Value.TrailingTrivia
+            : sequence.Count > 1 ? sequence[0].Value.TrailingTrivia
+            : LeadingTrivia;
         CopyKeyValueSeparator(next, prop);
         JsonTriviaEditing.PrepareInsert(separatorSource, next.Key.LeadingTrivia, prop.Key.LeadingTrivia, prop.Value.TrailingTrivia);
         sequence.Insert(index, prop);

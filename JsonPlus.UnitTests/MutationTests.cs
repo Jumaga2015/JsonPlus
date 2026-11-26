@@ -282,4 +282,56 @@ public class MutationTests
 
         AssertEncodesTo("""{ "a": { "x": 1 }, "b": 2 }""", value);
     }
+
+    [TestMethod]
+    public void InsertScalarItemAtStartOfSingleLineArrayAddsComma()
+    {
+        var value = JsonCodec.Decode("[1, 2]").InsertItem(0, new JsonNumber(0));
+
+        AssertEncodesTo("[0, 1, 2]", value);
+    }
+
+    [TestMethod]
+    public void RemoveFirstItemRemovesItsComments()
+    {
+        var value = JsonCodec.Decode(ArrayOfObjectsJson, JsonCodec.RelaxedDecodingOptions).RemoveItemAt(0);
+
+        AssertEncodesTo("""
+            [
+                // second
+                { "name": "dev" } // after dev
+            ]
+            """, value);
+    }
+
+    [TestMethod]
+    public void RemoveMiddleItemKeepsCommasOfNeighbours()
+    {
+        var value = JsonCodec.Decode("[1, 2, 3]").RemoveItemAt(1);
+
+        AssertEncodesTo("[1, 3]", value);
+    }
+
+    [TestMethod]
+    public void RemoveFirstPropertyRemovesItsComments()
+    {
+        var value = JsonCodec.Decode(ObjectJson, JsonCodec.RelaxedDecodingOptions).RemoveProperty("a");
+
+        AssertEncodesTo("""
+            {
+                // comment b
+                "b": 2 // after b
+            }
+            """, value);
+    }
+
+    [TestMethod]
+    public void RemovePropertyInstanceNotInObjectKeepsKey()
+    {
+        var obj = JsonCodec.Decode("""{ "a": 1 }""").GetObjectValue();
+
+        Assert.IsFalse(obj.Remove(new JsonProperty("a", new JsonNumber(1))));
+        Assert.IsTrue(obj.ContainsKey("a"));
+        AssertEncodesTo("""{ "a": 1 }""", obj);
+    }
 }

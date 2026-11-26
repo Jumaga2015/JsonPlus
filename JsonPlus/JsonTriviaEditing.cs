@@ -91,7 +91,7 @@ internal static class JsonTriviaEditing
     /// <summary>
     /// Prepares the trivia of a new element that is inserted before an existing element.
     /// </summary>
-    /// <param name="separatorSource">Trailing trivia of the element before the insertion point, or leading trivia of the container at index 0.</param>
+    /// <param name="separatorSource">Trailing trivia of the element before the insertion point. At index 0, trailing trivia of the first element, or leading trivia of the container if that element is the only one.</param>
     /// <param name="nextLeading">Leading trivia of the element after the insertion point.</param>
     /// <param name="newLeading">Leading trivia of the new element.</param>
     /// <param name="newTrailing">Trailing trivia of the new element.</param>
